@@ -21,8 +21,8 @@ let lowpassFilter: BiquadFilterNode | null = null
 const isAudioInitialized = ref(false)
 
 const PARAMETERS = {
-  oscillatorType: 'square',
-  lfoType: 'sine',
+  oscillatorType: 'square' as OscillatorType,
+  lfoType: 'sine' as OscillatorType,
   minLFOFreq: 0.1,
   maxLFOFreq: 15,
   lfoGain: 3,
@@ -133,8 +133,8 @@ onUnmounted(() => {
   if (audioContext) {
     audioContext.close()
   }
-  if (lfoOscillator) {
-    lfoOscillator.stop()
+  if (lfo) {
+    lfo.stop()
   }
   lowpassFilter = null
   window.removeEventListener('mousedown', handleMouseDown)
