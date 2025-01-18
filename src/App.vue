@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
+import CircularWaveform from './components/CircularWaveform.vue'
 
 // Reactive variables
 const isDragging = ref(false)
@@ -19,8 +20,37 @@ let lfoGain: GainNode | null = null
 let lowpassFilter: BiquadFilterNode | null = null
 const isAudioInitialized = ref(false)
 
-// Initialize audio context
+const PARAMETERS = {
+  oscillatorType: 'square',
+  lfoType: 'sine',
+  minLFOFreq: 0.1,
+  maxLFOFreq: 15,
+  lfoGain: 3,
+  minOscillatorGain: 150,
+  maxOscillatorGain: 500,
+}
 
+// Pentatonic scale frequencies (A2 to A5)
+const PENTATONIC_FREQUENCIES = [
+  110.0, // A2
+  130.81, // C3
+  146.83, // D3
+  164.81, // E3
+  196.0, // G3
+  220.0, // A3
+  261.63, // C4
+  293.66, // D4
+  329.63, // E4
+  392.0, // G4
+  440.0, // A4
+  523.25, // C5
+  587.33, // D5
+  659.25, // E5
+  783.99, // G5
+  880.0, // A5
+]
+
+// Initialize audio context
 function initAudio() {
   if (!isAudioInitialized.value) {
     audioContext = new AudioContext()
@@ -37,18 +67,18 @@ function initAudio() {
     lfo = audioContext.createOscillator()
     lfoGain = audioContext.createGain()
 
-    oscillator.type = 'sawtooth'
+    oscillator.type = PARAMETERS.oscillatorType
     oscillator.connect(lowpassFilter) // Connect oscillator to lowpass filter
     lowpassFilter.connect(gainNode) // Connect filter to gain
     gainNode.connect(audioContext.destination) // Connect gain to destination
 
-    lfo.type = 'square' // Square wave LFO
+    lfo.type = PARAMETERS.lfoType // Square wave LFO
     lfo.frequency.setValueAtTime(1, audioContext.currentTime) // LFO frequency (1 Hz for now)
     lfo.connect(lfoGain)
     lfoGain.connect(oscillator.frequency)
 
     // LFO modulation depth
-    lfoGain.gain.setValueAtTime(50, audioContext.currentTime) // Depth of modulation (adjust for effect)
+    lfoGain.gain.setValueAtTime(PARAMETERS.lfoGain, audioContext.currentTime) // Depth of modulation (adjust for effect)
 
     // Start the oscillator and LFO
     oscillator.start()
@@ -59,6 +89,12 @@ function initAudio() {
 
     isAudioInitialized.value = true
   }
+}
+
+function findClosestPentatonicFrequency(freq: number): number {
+  return PENTATONIC_FREQUENCIES.reduce((prev, curr) =>
+    Math.abs(curr - freq) < Math.abs(prev - freq) ? curr : prev,
+  )
 }
 
 onMounted(() => {
@@ -121,7 +157,8 @@ function updateWindowCenter() {
 function calculateRestPosition(mouseX: number, mouseY: number) {
   const windowDiv = document.querySelector('.window') as HTMLDivElement
   const rect = windowDiv.getBoundingClientRect()
-  const radius = rect.width / 2 + 20 // Adding small offset from window edge
+  const radius = 200 / 2 + 20 // Adding small offset from window edge
+  // const radius = rect.width / 2 + 20 // Adding small offset from window edge
 
   // Calculate vector from center to mouse
   const dx = mouseX - windowCenter.value.x
@@ -152,7 +189,7 @@ function handleMouseDown(event: MouseEvent) {
   const dy = event.clientY - currentRopeEnd.value.y
   const distance = Math.sqrt(dx * dx + dy * dy)
 
-  if (distance <= 10) {
+  if (distance <= 18) {
     // Check if click is on rope end
     initAudio()
     isDragging.value = true
@@ -199,7 +236,6 @@ function calculateAngle(x1: number, y1: number, x2: number, y2: number): number 
 
 function updateAudio(ropeLength: number) {
   if (oscillator && gainNode && audioContext && lfo && lfoGain) {
-    // Calculate the angle
     const angle = calculateAngle(
       windowCenter.value.x,
       windowCenter.value.y,
@@ -208,57 +244,57 @@ function updateAudio(ropeLength: number) {
     )
 
     if (lowpassFilter) {
-      const minCutoff = 200 // Minimum cutoff frequency
-      const maxCutoff = 10000 // Maximum cutoff frequency
+      const minCutoff = 0
+      const maxCutoff = 5000
       const normalizedLength = Math.min((ropeLength - 150) / (500 - 150), 1)
       const cutoffFrequency = minCutoff + normalizedLength * (maxCutoff - minCutoff)
       lowpassFilter.frequency.setValueAtTime(cutoffFrequency, audioContext.currentTime)
     }
 
-    // Map angle (in radians) to a frequency range (200-800Hz)
+    // Map angle to frequency range (A2 to A5)
     const normalizedAngle = (angle + Math.PI) / (2 * Math.PI) // Normalize to 0-1
-    const baseFrequency = 200 + normalizedAngle * 600 // Map to frequency range
+    const baseFrequency = 110 + normalizedAngle * 770 // Map to frequency range A2-A5
 
-    // Increase the LFO frequency with rope length
-    const minLFODepth = 0.5 // Minimum LFO frequency depth
-    const maxLFODepth = 30 // Maximum LFO frequency depth
-    const normalizedRopeLength = Math.min(
-      (ropeLength - 150) / (500 - 150), // Normalize rope length (between 150 and 500)
-      1,
-    )
+    // Snap to closest pentatonic frequency
+    const snappedFrequency = findClosestPentatonicFrequency(baseFrequency)
 
-    const lfoFrequency = minLFODepth + normalizedRopeLength * (maxLFODepth - minLFODepth)
+    // Reduce LFO effect for clearer notes
+    const minLFOFreq = PARAMETERS.minLFOFreq
+    const maxLFOFreq = PARAMETERS.maxLFOFreq
+    const normalizedRopeLength = Math.min((ropeLength - 150) / (500 - 150), 1)
+
+    const lfoFrequency = minLFOFreq + normalizedRopeLength * (maxLFOFreq - minLFOFreq)
     lfo.frequency.setValueAtTime(lfoFrequency, audioContext.currentTime)
 
-    // Apply LFO modulation to oscillator frequency (the LFO affects the base frequency)
+    // Apply snapped frequency with reduced LFO modulation
+    //lfoGain.gain.value = 0
     oscillator.frequency.setTargetAtTime(
-      baseFrequency + lfoGain.gain.value,
+      snappedFrequency + lfoGain.gain.value, // Reduced LFO influence
       audioContext.currentTime,
       0.1,
     )
 
-    // Smooth gain transition based on rope length
-    const minGainDistance = 150
-    const maxGainDistance = 500 // Adjust based on your max length
+    // Gain handling remains the same
+    const minGainDistance = PARAMETERS.minOscillatorGain
+    const maxGainDistance = PARAMETERS.maxOscillatorGain
     let targetGain = 0
 
     if (ropeLength > minGainDistance) {
-      // Interpolate gain between minGainDistance and maxGainDistance
       const normalizedLength = Math.min(
         (ropeLength - minGainDistance) / (maxGainDistance - minGainDistance),
         1,
       )
-      targetGain = normalizedLength * 0.75 // Gain smoothly interpolates from 0 to 1
+      targetGain = normalizedLength * 0.4
     }
 
-    // Update the gain node
     gainNode.gain.setTargetAtTime(targetGain, audioContext.currentTime, 0.1)
   }
 }
 
 function animate() {
   const canvas = containerCanvas.value
-  if (!canvas) {
+  const windowDiv = document.querySelector('.window') as HTMLDivElement
+  if (!canvas || !windowDiv) {
     animationFrameId = requestAnimationFrame(animate)
     return
   }
@@ -284,6 +320,16 @@ function animate() {
   )
   updateAudio(ropeLength)
 
+  // Dynamically adjust window size based on rope length
+  const baseSize = 200 // Minimum size
+  const maxSize = 500 // Maximum size
+  const normalizedLength = Math.min((ropeLength - 150) / (500 - 150), 1)
+  const newSize = baseSize + normalizedLength * (maxSize - baseSize)
+
+  windowDiv.style.width = `${newSize}px`
+  windowDiv.style.height = `${newSize}px`
+
+  // Draw rope
   context.beginPath()
   context.moveTo(windowCenter.value.x, windowCenter.value.y)
   context.lineTo(currentRopeEnd.value.x, currentRopeEnd.value.y)
@@ -291,8 +337,9 @@ function animate() {
   context.lineWidth = 2
   context.stroke()
 
+  // Draw rope end
   context.beginPath()
-  context.arc(currentRopeEnd.value.x, currentRopeEnd.value.y, 10, 0, Math.PI * 2)
+  context.arc(currentRopeEnd.value.x, currentRopeEnd.value.y, 18, 0, Math.PI * 2)
   context.fillStyle = 'rgba(100,100,100,1)'
   context.fill()
 
@@ -305,7 +352,11 @@ function animate() {
     <canvas ref="containerCanvas" class="container-canvas"></canvas>
     <div class="window">
       <div class="content">
-        <!-- Window content here -->
+        <CircularWaveform
+          v-if="isAudioInitialized && audioContext && oscillator"
+          :audioContext="audioContext"
+          :oscillator="oscillator"
+        />
       </div>
     </div>
   </div>
@@ -341,13 +392,9 @@ function animate() {
   border-radius: 50%;
   padding: 20px;
   z-index: 2;
-  transition: ease-in-out 0.3s;
-}
-
-.window:hover {
-  width: 500px;
-  height: 500px;
-  box-shadow: 0px 0px 100px rgba(0, 0, 0, 0.4);
+  transition:
+    width 0.1s ease,
+    height 0.1s ease;
 }
 
 .content {
