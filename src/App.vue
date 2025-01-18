@@ -16,6 +16,7 @@ let oscillator: OscillatorNode | null = null
 let gainNode: GainNode | null = null
 let lfo: OscillatorNode | null = null
 let lfoGain: GainNode | null = null
+let lowpassFilter: BiquadFilterNode | null = null
 const isAudioInitialized = ref(false)
 
 // Initialize audio context
@@ -26,15 +27,22 @@ function initAudio() {
     oscillator = audioContext.createOscillator()
     gainNode = audioContext.createGain()
 
+    // Create the lowpass filter
+    lowpassFilter = audioContext.createBiquadFilter()
+    lowpassFilter.type = 'lowpass'
+    lowpassFilter.frequency.setValueAtTime(1000, audioContext.currentTime) // Set initial cutoff frequency
+    lowpassFilter.Q.setValueAtTime(10, audioContext.currentTime) // Set quality factor (resonance)
+
     // Create LFO for frequency modulation
     lfo = audioContext.createOscillator()
     lfoGain = audioContext.createGain()
 
-    oscillator.type = 'sine'
-    oscillator.connect(gainNode)
-    gainNode.connect(audioContext.destination)
+    oscillator.type = 'sawtooth'
+    oscillator.connect(lowpassFilter) // Connect oscillator to lowpass filter
+    lowpassFilter.connect(gainNode) // Connect filter to gain
+    gainNode.connect(audioContext.destination) // Connect gain to destination
 
-    lfo.type = 'sine' // Sine wave LFO
+    lfo.type = 'square' // Square wave LFO
     lfo.frequency.setValueAtTime(1, audioContext.currentTime) // LFO frequency (1 Hz for now)
     lfo.connect(lfoGain)
     lfoGain.connect(oscillator.frequency)
@@ -92,6 +100,7 @@ onUnmounted(() => {
   if (lfoOscillator) {
     lfoOscillator.stop()
   }
+  lowpassFilter = null
   window.removeEventListener('mousedown', handleMouseDown)
   window.removeEventListener('mousemove', handleMouseMove)
   window.removeEventListener('mouseup', handleMouseUp)
@@ -198,19 +207,27 @@ function updateAudio(ropeLength: number) {
       currentRopeEnd.value.y,
     )
 
+    if (lowpassFilter) {
+      const minCutoff = 200 // Minimum cutoff frequency
+      const maxCutoff = 10000 // Maximum cutoff frequency
+      const normalizedLength = Math.min((ropeLength - 150) / (500 - 150), 1)
+      const cutoffFrequency = minCutoff + normalizedLength * (maxCutoff - minCutoff)
+      lowpassFilter.frequency.setValueAtTime(cutoffFrequency, audioContext.currentTime)
+    }
+
     // Map angle (in radians) to a frequency range (200-800Hz)
     const normalizedAngle = (angle + Math.PI) / (2 * Math.PI) // Normalize to 0-1
     const baseFrequency = 200 + normalizedAngle * 600 // Map to frequency range
 
     // Increase the LFO frequency with rope length
     const minLFODepth = 0.5 // Minimum LFO frequency depth
-    const maxLFODepth = 5 // Maximum LFO frequency depth
+    const maxLFODepth = 30 // Maximum LFO frequency depth
     const normalizedRopeLength = Math.min(
       (ropeLength - 150) / (500 - 150), // Normalize rope length (between 150 and 500)
       1,
     )
 
-    const lfoFrequency = minLFODepth + normalizedRopeLength * (maxLFODepth - minLFODepth) * 20
+    const lfoFrequency = minLFODepth + normalizedRopeLength * (maxLFODepth - minLFODepth)
     lfo.frequency.setValueAtTime(lfoFrequency, audioContext.currentTime)
 
     // Apply LFO modulation to oscillator frequency (the LFO affects the base frequency)
